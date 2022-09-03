@@ -1,78 +1,107 @@
-import websocket
-import base64
 import requests
 import json
 import datetime
 import time
 
-def get_cid(av):
-    response = requests.get("https://api.bilibili.com/x/web-interface/view?aid=" + str(av))
-    response.encoding = 'utf-8'
-    res = response.text
-    # print(res)
-    data = json.loads(res)
-    c = data['data']['cid']
-    # print(c)
-    return c
+import get_video
 
-def make_send(av):
-    cid = str(get_cid(av))
-    res = b'\x00\x00\x00\\\x00\x12\x00\x01\x00\x00\x00\x07\x00\x00\x00\x01\x00\x00{"room_id":"video://' + str(av).encode('utf-8') + '/'.encode('utf-8') + cid.encode('utf-8') + '","platform":"web","accepts":[1000]}'.encode('utf-8')
-    return res
+# 自定义配置项
+checkingList = ['BV1aW4y1q7si','BV1DG4y1i7Lu'] # 被检测的视频列表,请填写bvid,默认(目前只能)获取视频的首个分p
+EACH_VIDEO_GAPTIME = 3 # (秒) 建议最小次3秒
+EACH_ROUND_GAPTIME = 60 # (秒) 建议最小每轮回60秒
+UPGRADE_VIDEO_DETAIL = 1 # 0 关闭视频细节更新(包括浏览数 点赞数 投币数等); 1 开启关闭视频细节更新 
 
-def get_online(text):
-    cache = text.find(b'"online":')
-    # print(cache)
-    cache2 = text[cache+9:].find(b',')
-    get = int(text[cache+9:cache2+9+cache])
-    print(get)
-    return get
+# 下方为程序自用配置项,无需改动
+STATUS_INIT = -1
+checkingListVideo =[]
 
+def printTime():
+    now_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log(10,now_time)
 
-def connect(plz):
-    url = "wss://broadcast.chat.bilibili.com:7823/sub"
-    normal = base64.b64decode('AAAAIQASAAEAAAACAAAACQAAW29iamVjdCBPYmplY3Rd') 
-    ws = websocket.create_connection(url,timeout=10)
-    ws.send(bytes(plz))
-    get = ws.recv()
-    # print(get)
+def log(status,text):
+    stText = ''
+    if(status == 0): # 正常日志
+        stText = '[-]'
+    if(status == 1): # 通知
+        stText = '[●]'
+    if(status == -1): # 警告
+        stText = '[!]'
+    if(status == 2): # 间隔
+        stText = '[/]'
+        print('{} {}'.format(stText,text*80))
+        return
+    if(status == 10): # 时间
+        stText = '[~]'
+    
+    print('{} {}'.format(stText,text))
 
-    ws.send(bytes(normal))
-    get = ws.recv()
-    # print(get)
-    if get.find(b'online') != -1:
-        # online = get_online(get)
-        online=get_online(get)
-        return online
-    else :
-        print("None")
-
-def get_online_from_av(av):
-    send = make_send(av)
-
-    online = connect(send)
-
+def getOnline(v:get_video.bv):
+    api = "https://api.bilibili.com/x/player/online/total?aid={}&cid={}&bvid={}".format(v.aid,v.cid,v.bvid)
+    headers={
+        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0",
+        "Referer":"https://www.bilibili.com/video/{}".format(v.bvid),
+        "Origin":"https://www.bilibili.com"
+    }
+    
+    response = requests.get(api,headers=headers)
+    data = json.loads(response.text)
+    online = int(data['data']['total'])
     return online
 
+def init():
+    global checkingList,checkingListVideo,EACH_VIDEO_GAPTIME,STATUS_INIT
 
-def write_file(onlines,times):
+    for video in checkingList:
+        v = get_video.getVideoClass(video)
+        checkingListVideo.append(v)
+        log(1,'Appended Video:{}'.format(v.title))
+        time.sleep(EACH_VIDEO_GAPTIME)
     
-    with open(file_name,'a') as file_obj:
-      file_obj.write(str(times) + ',' + str(onlines) + '\r')
-
-
-file_name = str(input("File_Name(a.txt):"))
-avid = int(input('AVid(85919470):'))
-
-
-
-
-while True:
+    STATUS_INIT = 1
+        
     
-    online=get_online_from_av(avid)
-    now_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(now_time)
-    write_file(online,now_time)
 
-    
-    time.sleep(60)
+def main():
+    init()
+    global checkingListVideo,EACH_VIDEO_GAPTIME,EACH_ROUND_GAPTIME,UPGRADE_VIDEO_DETAIL,STATUS_INIT
+
+    while 1:
+        printTime()
+        if(UPGRADE_VIDEO_DETAIL == 0):
+            for video in checkingListVideo:
+                
+                online = getOnline(video)
+                log(0,"bvid:{} Title:{}... Online:{}".format(video.bvid,video.title[:16],online))
+                time.sleep(EACH_VIDEO_GAPTIME)
+
+        if(UPGRADE_VIDEO_DETAIL == 1):
+            if(STATUS_INIT == 0): 
+                cacheList= [] # 视频细节更新方法为删除原表并重新制作新表，再获取在线人数
+                for video in checkingListVideo: 
+                    cacheList.append(video.bvid)
+
+                checkingListVideo.clear()
+                log(1,'Checking List cleared')
+                for bv in cacheList:
+                    v = get_video.getVideoClass(bv)
+                    checkingListVideo.append(v)
+                    log(1,'Upgrade Video:{}'.format(v.title))
+                    time.sleep(EACH_VIDEO_GAPTIME)
+
+                for video in checkingListVideo:
+                    
+                    online = getOnline(video)
+                    log(0,"bvid:{} Title:{}... Online:{} View:{}".format(video.bvid,video.title[:16],online,video.stat.view))
+                    time.sleep(EACH_VIDEO_GAPTIME)
+            else: # 若是初始化模式，不需要再次更新
+                for video in checkingListVideo:
+                    online = getOnline(video)
+                    log(0,"bvid:{} Title:{}... Online:{} View:{}".format(video.bvid,video.title[:16],online,video.stat.view))
+                    time.sleep(EACH_VIDEO_GAPTIME)
+                    
+        log(2,'-')
+        STATUS_INIT = 0
+        time.sleep(EACH_ROUND_GAPTIME)
+
+main()
