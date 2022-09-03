@@ -44,5 +44,5 @@
 |coin |投币数|
 |share| 分享数|
 |now_rank |现在排行榜名次|
-|his_rank| 历史排行榜名词|
+|his_rank| 历史排行榜名次|
 |like |点赞数|
